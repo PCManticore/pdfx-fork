@@ -39,8 +39,14 @@ import json
 import shutil
 import logging
 
+from .extractor import extract_urls
+from .backends import PDFMinerBackend, TextBackend
+from .downloader import download_refs
+from .exceptions import FileNotFoundError, DownloadError, PDFInvalidError
+from pdfminer.pdfparser import PDFSyntaxError
+
 __title__ = 'pdfx'
-__version__ = '1.3.1'
+__version__ = '1.3.2'
 __author__ = 'Chris Hager'
 __license__ = 'Apache 2.0'
 __copyright__ = 'Copyright 2015 Chris Hager'
@@ -56,12 +62,6 @@ else:
     from io import BytesIO
     from urllib.request import Request, urlopen
     unicode = str
-
-from .extractor import extract_urls
-from .backends import PDFMinerBackend, TextBackend
-from .downloader import download_urls
-from .exceptions import FileNotFoundError, DownloadError, PDFInvalidError
-from pdfminer.pdfparser import PDFSyntaxError
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +91,7 @@ class PDFx(object):
     reader = None  # ReaderBackend
     summary = {}
 
-    def __init__(self, uri):
+    def __init__(self, uri, signal_extract_page=None):
         """
         Open PDF handle and parse PDF metadata
         - `uri` can bei either a filename or an url
@@ -99,6 +99,8 @@ class PDFx(object):
         logger.debug("Init with uri: %s" % uri)
 
         self.uri = uri
+
+        self.signal_extract_page = signal_extract_page  # args: int(pagenum)
 
         # Find out whether pdf is an URL or local file
         url = extract_urls(uri)
@@ -124,7 +126,10 @@ class PDFx(object):
 
         # Create ReaderBackend instance
         try:
-            self.reader = PDFMinerBackend(self.stream)
+            self.reader = PDFMinerBackend(
+                self.stream,
+                signal_extract_page=self.signal_extract_page
+            )
         except PDFSyntaxError as e:
             raise PDFInvalidError("Invalid PDF (%s)" % unicode(e))
 
@@ -193,15 +198,15 @@ class PDFx(object):
             f.write(json.dumps(self.summary, indent=2))
         logger.debug("- Saved metadata to '%s'" % fn_json)
 
-        # Download references
-        urls = [ref.ref for ref in self.get_references("pdf")]
-        if not urls:
+        # Download PDF references
+        refs = self.get_references("pdf")
+        if not refs:
             return
 
         dir_referenced_pdfs = os.path.join(
             target_dir, "%s-referenced-pdfs" % self.fn)
         logger.debug("Downloading %s referenced pdfs..." %
-                     len(urls))
+                     len(refs))
 
         # Download urls as a set to avoid duplicates
-        download_urls(urls, dir_referenced_pdfs)
+        download_refs(refs, dir_referenced_pdfs)

@@ -21,14 +21,14 @@ from .libs.xmp import xmp_to_dict
 # referenced in the other pdfparser modules
 from pdfminer import settings as pdfminer_settings
 pdfminer_settings.STRICT = False
-from pdfminer import psparser
-from pdfminer.pdfdocument import PDFDocument
-from pdfminer.pdfparser import PDFParser
-from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
-from pdfminer.pdfpage import PDFPage
-from pdfminer.pdftypes import resolve1, PDFObjRef
-from pdfminer.converter import TextConverter
-from pdfminer.layout import LAParams
+from pdfminer import psparser  # NOQA
+from pdfminer.pdfdocument import PDFDocument  # NOQA
+from pdfminer.pdfparser import PDFParser  # NOQA
+from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter  # NOQA
+from pdfminer.pdfpage import PDFPage  # NOQA
+from pdfminer.pdftypes import resolve1, PDFObjRef  # NOQA
+from pdfminer.converter import TextConverter  # NOQA
+from pdfminer.layout import LAParams  # NOQA
 
 
 logger = logging.getLogger(__name__)
@@ -38,6 +38,14 @@ IS_PY2 = sys.version_info < (3, 0)
 if not IS_PY2:
     # Python 3
     unicode = str
+
+
+def sanitize_url(url):
+    """ Make sure this url works with urllib2 (ascii, http, etc) """
+    if url and not url.startswith("http"):
+        url = u"http://%s" % url
+    # url = url.encode('ascii', 'ignore').decode("utf-8")
+    return url
 
 
 def make_compat_str(in_str):
@@ -78,12 +86,16 @@ class Reference(object):
     page = 0
 
     def __init__(self, uri, page=0):
-        self.ref = uri
-        self.reftype = "url"
         self.page = page
 
         # Detect reftype by filetype
+        if uri.lower().startswith("mailto:"):
+            self.reftype = "email"
+            return
+
+        # Detect reftype by filetype
         if uri.lower().endswith(".pdf"):
+            self.ref = sanitize_url(uri)
             self.reftype = "pdf"
             return
 
@@ -99,6 +111,10 @@ class Reference(object):
             self.ref = doi.pop()
             self.reftype = "doi"
             return
+
+        # If nothing else matches, then this is a URL
+        self.reftype = "url"
+        self.ref = sanitize_url(uri)
 
     def __hash__(self):
         return hash(self.ref)
@@ -178,7 +194,8 @@ class ReaderBackend(object):
 
 
 class PDFMinerBackend(ReaderBackend):
-    def __init__(self, pdf_stream, password='', pagenos=[], maxpages=0):
+    def __init__(self, pdf_stream, password='', pagenos=[], maxpages=0,
+                 signal_extract_page=None):
         ReaderBackend.__init__(self)
         self.pdf_stream = pdf_stream
 
@@ -215,9 +232,11 @@ class PDFMinerBackend(ReaderBackend):
                                       maxpages=maxpages, password=password,
                                       caching=True, check_extractable=False):
             # Read page contents
-            interpreter.process_page(page)
             self.metadata["Pages"] += 1
             self.curpage += 1
+            if signal_extract_page:
+                signal_extract_page(self.curpage)
+            interpreter.process_page(page)
 
             # Collect URL annotations
             # try:
@@ -251,6 +270,9 @@ class PDFMinerBackend(ReaderBackend):
             self.references.add(Reference(ref, self.curpage))
 
         for ref in extractor.extract_doi(self.text):
+            self.references.add(Reference(ref, self.curpage))
+
+        for ref in extractor.extract_emails(self.text):
             self.references.add(Reference(ref, self.curpage))
 
     def resolve_PDFObjRef(self, obj_ref):
@@ -311,4 +333,7 @@ class TextBackend(ReaderBackend):
             self.references.add(Reference(ref))
 
         for ref in extractor.extract_doi(self.text):
+            self.references.add(Reference(ref))
+
+        for ref in extractor.extract_emails(self.text):
             self.references.add(Reference(ref))
