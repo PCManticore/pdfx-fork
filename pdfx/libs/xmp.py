@@ -46,6 +46,9 @@ class XmpParser(object):
     @property
     def meta(self):
         """ A dictionary of all the parsed metadata. """
+        if self.rdftree is None:
+            return {}
+
         meta = defaultdict(dict)
         for desc in self.rdftree.findall(RDF_NS+'Description'):
             for el in desc.getchildren():
