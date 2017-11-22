@@ -267,6 +267,9 @@ class PDFMinerBackend(ReaderBackend):
             return None
 
         obj_resolved = obj_ref.resolve()
+        if obj_resolved is None:
+            return None
+
         # print("obj_resolved:", obj_resolved, type(obj_resolved))
         if isinstance(obj_resolved, bytes):
             obj_resolved = obj_resolved.decode("utf-8")
